@@ -192,7 +192,7 @@ expect
 
 encodeU128 : U128 -> FutureEncoder MsgPack
 encodeU128 = \_ ->
-    _ <- encodeTry
+    _ <- tryEncode
     Err U128Unsupported
 
 expect
@@ -210,7 +210,7 @@ encodeI64 : I64 -> FutureEncoder MsgPack
 
 encodeI128 : I128 -> FutureEncoder MsgPack
 encodeI128 = \_ ->
-    _ <- encodeTry
+    _ <- tryEncode
     Err I128Unsupported
 
 expect
@@ -264,22 +264,22 @@ encode = \val ->
 # These are for the exact types in the msgpack spec
 # These assume the correct encoder was chosen that will lead to minimal sized results.
 
-encodeTry : (EncodeState -> Result EncodeState EncodeError) -> FutureEncoder MsgPack
-encodeTry = \cont ->
+tryEncode : (EncodeState -> Result EncodeState EncodeError) -> FutureEncoder MsgPack
+tryEncode = \cont ->
     FutureEncode.custom \@MsgPack res ->
         Result.try res cont
         |> @MsgPack
 
 encodePosFixInt : U8 -> FutureEncoder MsgPack
 encodePosFixInt = \n ->
-    bytes <- encodeTry
+    bytes <- tryEncode
     bytes
     |> List.append n
     |> Ok
 
 encodeUInt8 : U8 -> FutureEncoder MsgPack
 encodeUInt8 = \n ->
-    bytes <- encodeTry
+    bytes <- tryEncode
     bytes
     |> List.reserve 2
     |> List.append 0xCC
@@ -288,7 +288,7 @@ encodeUInt8 = \n ->
 
 encodeUInt16 : U16 -> FutureEncoder MsgPack
 encodeUInt16 = \n ->
-    bytes <- encodeTry
+    bytes <- tryEncode
     b0 = Num.shiftRightZfBy n 8 |> Num.toU8
     b1 = Num.toU8 n
     bytes
@@ -300,7 +300,7 @@ encodeUInt16 = \n ->
 
 encodeUInt32 : U32 -> FutureEncoder MsgPack
 encodeUInt32 = \n ->
-    bytes <- encodeTry
+    bytes <- tryEncode
     b0 = Num.shiftRightZfBy n 24 |> Num.toU8
     b1 = Num.shiftRightZfBy n 16 |> Num.toU8
     b2 = Num.shiftRightZfBy n 8 |> Num.toU8
@@ -316,7 +316,7 @@ encodeUInt32 = \n ->
 
 encodeUInt64 : U64 -> FutureEncoder MsgPack
 encodeUInt64 = \n ->
-    bytes <- encodeTry
+    bytes <- tryEncode
     b0 = Num.shiftRightZfBy n 56 |> Num.toU8
     b1 = Num.shiftRightZfBy n 48 |> Num.toU8
     b2 = Num.shiftRightZfBy n 40 |> Num.toU8
