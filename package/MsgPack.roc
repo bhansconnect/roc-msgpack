@@ -20,7 +20,7 @@ module [
 import FutureEncode exposing [FutureEncoder, FutureEncoderFormatting, SequenceWalker, MappingWalker, FutureEncoding]
 import FutureDecode exposing [FutureDecoder, FutureDecoderFormatting, SequenceInit, SequenceBuilder, MappingInit, MappingBuilder, FutureDecoding]
 
-EncodeError : [U128Unsupported, I128Unsupported]
+EncodeError : [U128Unsupported, I128Unsupported, DecUnsupported]
 EncodeState : List U8
 
 MsgPack := Result EncodeState EncodeError
@@ -78,7 +78,7 @@ MsgPack := Result EncodeState EncodeError
 
 # TODO: When the compiler is fixed, remove all the Num.intCast's for this constant.
 maxPosFixInt = 0x7F
-# minNegFixInt = -32 # 0xe0
+minNegFixInt = -33 # 0xDF
 
 encodeU8 : U8 -> FutureEncoder MsgPack
 encodeU8 = \n ->
@@ -201,12 +201,142 @@ expect
     got == want
 
 encodeI8 : I8 -> FutureEncoder MsgPack
+encodeI8 = \n ->
+    if n >= 0 then
+        encodeU8 (Num.toU8 n)
+    else if n > (Num.intCast minNegFixInt) then
+        encodeNegFixInt n
+    else
+        encodeInt8 n
+
+expect
+    got = encode (@TestI8 7)
+    want = Ok [0x07]
+    got == want
+
+expect
+    got = encode (@TestI8 -7)
+    want = Ok [0xF9]
+    got == want
+
+expect
+    got = encode (@TestI8 -33)
+    want = Ok [0xD0, 0xDF]
+    got == want
 
 encodeI16 : I16 -> FutureEncoder MsgPack
+encodeI16 = \n ->
+    if n >= 0 then
+        encodeU16 (Num.toU16 n)
+    else if n > (Num.intCast minNegFixInt) then
+        encodeNegFixInt (Num.toI8 n)
+    else if n > 0xFF80 then
+        encodeInt8 (Num.toI8 n)
+    else
+        encodeInt16 n
+
+expect
+    got = encode (@TestI16 255)
+    want = Ok [0xCC, 0xFF]
+    got == want
+
+expect
+    got = encode (@TestI16 -7)
+    want = Ok [0xF9]
+    got == want
+
+expect
+    got = encode (@TestI16 -33)
+    want = Ok [0xD0, 0xDF]
+    got == want
+
+expect
+    got = encode (@TestI16 -129)
+    want = Ok [0xD1, 0xFF, 0x7F]
+    got == want
 
 encodeI32 : I32 -> FutureEncoder MsgPack
+encodeI32 = \n ->
+    if n >= 0 then
+        encodeU32 (Num.toU32 n)
+    else if n > (Num.intCast minNegFixInt) then
+        encodeNegFixInt (Num.toI8 n)
+    else if n > 0xFFFF_FF80 then
+        encodeInt8 (Num.toI8 n)
+    else if n > 0xFFFF_8000 then
+        encodeInt16 (Num.toI16 n)
+    else
+        encodeInt32 n
+
+expect
+    got = encode (@TestI32 65535)
+    want = Ok [0xCD, 0xFF, 0xFF]
+    got == want
+
+expect
+    got = encode (@TestI32 -7)
+    want = Ok [0xF9]
+    got == want
+
+expect
+    got = encode (@TestI32 -33)
+    want = Ok [0xD0, 0xDF]
+    got == want
+
+expect
+    got = encode (@TestI32 -129)
+    want = Ok [0xD1, 0xFF, 0x7F]
+    got == want
+
+expect
+    got = encode (@TestI32 -32768)
+    want = Ok [0xD2, 0xFF, 0xFF, 0x80, 0x00]
+    got == want
 
 encodeI64 : I64 -> FutureEncoder MsgPack
+encodeI64 = \n ->
+    if n >= 0 then
+        encodeU64 (Num.toU64 n)
+    else if n > (Num.intCast minNegFixInt) then
+        encodeNegFixInt (Num.toI8 n)
+    else if n > 0xFFFF_FFFF_FFFF_FF80 then
+        encodeInt8 (Num.toI8 n)
+    else if n > 0xFFFF_FFFF_FFFF_8000 then
+        encodeInt16 (Num.toI16 n)
+    else if n > 0xFFFF_FFFF_8000_0000 then
+        encodeInt32 (Num.toI32 n)
+    else
+        encodeInt64 n
+
+expect
+    got = encode (@TestI64 4294967295)
+    want = Ok [0xCE, 0xFF, 0xFF, 0xFF, 0xFF]
+    got == want
+
+expect
+    got = encode (@TestI64 -7)
+    want = Ok [0xF9]
+    got == want
+
+expect
+    got = encode (@TestI64 -33)
+    want = Ok [0xD0, 0xDF]
+    got == want
+
+expect
+    got = encode (@TestI64 -32768)
+    want = Ok [0xD2, 0xFF, 0xFF, 0x80, 0x00]
+    got == want
+
+expect
+    got = encode (@TestI64 -129)
+    want = Ok [0xD1, 0xFF, 0x7F]
+    got == want
+
+expect
+    got = encode (@TestI64 -2147483648)
+    want = Ok [0xD3, 0xFF, 0xFF, 0xFF, 0xFF, 0x80, 0x00, 0x00, 0x00]
+    got == want
 
 encodeI128 : I128 -> FutureEncoder MsgPack
 encodeI128 = \_ ->
@@ -223,6 +353,14 @@ encodeF32 : F32 -> FutureEncoder MsgPack
 encodeF64 : F64 -> FutureEncoder MsgPack
 
 encodeDec : Dec -> FutureEncoder MsgPack
+encodeDec = \_ ->
+    _ <- tryEncode
+    Err DecUnsupported
+
+expect
+    got = encode (@TestDec 0.2)
+    want = Err DecUnsupported
+    got == want
 
 encodeBool : Bool -> FutureEncoder MsgPack
 
@@ -328,6 +466,77 @@ encodeUInt64 = \n ->
     bytes
     |> List.reserve 9
     |> List.append 0xCF
+    |> List.append b0
+    |> List.append b1
+    |> List.append b2
+    |> List.append b3
+    |> List.append b4
+    |> List.append b5
+    |> List.append b6
+    |> List.append b7
+    |> Ok
+
+encodeNegFixInt : I8 -> FutureEncoder MsgPack
+encodeNegFixInt = \in ->
+    bytes <- tryEncode
+    bytes
+    |> List.append (Num.toU8 in)
+    |> Ok
+
+encodeInt8 : I8 -> FutureEncoder MsgPack
+encodeInt8 = \in ->
+    bytes <- tryEncode
+    bytes
+    |> List.reserve 2
+    |> List.append 0xD0
+    |> List.append (Num.toU8 in)
+    |> Ok
+
+encodeInt16 : I16 -> FutureEncoder MsgPack
+encodeInt16 = \in ->
+    bytes <- tryEncode
+    n = Num.toU16 in
+    b0 = Num.shiftRightZfBy n 8 |> Num.toU8
+    b1 = Num.toU8 n
+    bytes
+    |> List.reserve 3
+    |> List.append 0xD1
+    |> List.append b0
+    |> List.append b1
+    |> Ok
+
+encodeInt32 : I32 -> FutureEncoder MsgPack
+encodeInt32 = \in ->
+    bytes <- tryEncode
+    n = Num.toU32 in
+    b0 = Num.shiftRightZfBy n 24 |> Num.toU8
+    b1 = Num.shiftRightZfBy n 16 |> Num.toU8
+    b2 = Num.shiftRightZfBy n 8 |> Num.toU8
+    b3 = Num.toU8 n
+    bytes
+    |> List.reserve 5
+    |> List.append 0xD2
+    |> List.append b0
+    |> List.append b1
+    |> List.append b2
+    |> List.append b3
+    |> Ok
+
+encodeInt64 : I64 -> FutureEncoder MsgPack
+encodeInt64 = \in ->
+    bytes <- tryEncode
+    n = Num.toU64 in
+    b0 = Num.shiftRightZfBy n 56 |> Num.toU8
+    b1 = Num.shiftRightZfBy n 48 |> Num.toU8
+    b2 = Num.shiftRightZfBy n 40 |> Num.toU8
+    b3 = Num.shiftRightZfBy n 32 |> Num.toU8
+    b4 = Num.shiftRightZfBy n 24 |> Num.toU8
+    b5 = Num.shiftRightZfBy n 16 |> Num.toU8
+    b6 = Num.shiftRightZfBy n 8 |> Num.toU8
+    b7 = Num.toU8 n
+    bytes
+    |> List.reserve 9
+    |> List.append 0xD3
     |> List.append b0
     |> List.append b1
     |> List.append b2
@@ -498,6 +707,82 @@ decoderTestU128 = FutureDecode.custom \state ->
     FutureDecode.decodeWith state FutureDecode.u128
     |> FutureDecode.mapResult @TestU128
 
+TestI8 := I8
+    implements [
+        FutureEncoding {
+            toFutureEncoder: toFutureEncoderTestI8,
+        },
+        FutureDecoding {
+            decoder: decoderTestI8,
+        },
+    ]
+
+toFutureEncoderTestI8 : TestI8 -> FutureEncoder state
+toFutureEncoderTestI8 = \@TestI8 i8 ->
+    FutureEncode.i8 i8
+
+decoderTestI8 : FutureDecoder state TestI8 err where state implements FutureDecoderFormatting
+decoderTestI8 = FutureDecode.custom \state ->
+    FutureDecode.decodeWith state FutureDecode.i8
+    |> FutureDecode.mapResult @TestI8
+
+TestI16 := I16
+    implements [
+        FutureEncoding {
+            toFutureEncoder: toFutureEncoderTestI16,
+        },
+        FutureDecoding {
+            decoder: decoderTestI16,
+        },
+    ]
+
+toFutureEncoderTestI16 : TestI16 -> FutureEncoder state
+toFutureEncoderTestI16 = \@TestI16 i16 ->
+    FutureEncode.i16 i16
+
+decoderTestI16 : FutureDecoder state TestI16 err where state implements FutureDecoderFormatting
+decoderTestI16 = FutureDecode.custom \state ->
+    FutureDecode.decodeWith state FutureDecode.i16
+    |> FutureDecode.mapResult @TestI16
+
+TestI32 := I32
+    implements [
+        FutureEncoding {
+            toFutureEncoder: toFutureEncoderTestI32,
+        },
+        FutureDecoding {
+            decoder: decoderTestI32,
+        },
+    ]
+
+toFutureEncoderTestI32 : TestI32 -> FutureEncoder state
+toFutureEncoderTestI32 = \@TestI32 i32 ->
+    FutureEncode.i32 i32
+
+decoderTestI32 : FutureDecoder state TestI32 err where state implements FutureDecoderFormatting
+decoderTestI32 = FutureDecode.custom \state ->
+    FutureDecode.decodeWith state FutureDecode.i32
+    |> FutureDecode.mapResult @TestI32
+
+TestI64 := I64
+    implements [
+        FutureEncoding {
+            toFutureEncoder: toFutureEncoderTestI64,
+        },
+        FutureDecoding {
+            decoder: decoderTestI64,
+        },
+    ]
+
+toFutureEncoderTestI64 : TestI64 -> FutureEncoder state
+toFutureEncoderTestI64 = \@TestI64 i64 ->
+    FutureEncode.i64 i64
+
+decoderTestI64 : FutureDecoder state TestI64 err where state implements FutureDecoderFormatting
+decoderTestI64 = FutureDecode.custom \state ->
+    FutureDecode.decodeWith state FutureDecode.i64
+    |> FutureDecode.mapResult @TestI64
+
 TestI128 := I128
     implements [
         FutureEncoding {
@@ -516,4 +801,23 @@ decoderTestI128 : FutureDecoder state TestI128 err where state implements Future
 decoderTestI128 = FutureDecode.custom \state ->
     FutureDecode.decodeWith state FutureDecode.i128
     |> FutureDecode.mapResult @TestI128
+
+TestDec := Dec
+    implements [
+        FutureEncoding {
+            toFutureEncoder: toFutureEncoderTestDec,
+        },
+        FutureDecoding {
+            decoder: decoderTestDec,
+        },
+    ]
+
+toFutureEncoderTestDec : TestDec -> FutureEncoder state
+toFutureEncoderTestDec = \@TestDec dec ->
+    FutureEncode.dec dec
+
+decoderTestDec : FutureDecoder state TestDec err where state implements FutureDecoderFormatting
+decoderTestDec = FutureDecode.custom \state ->
+    FutureDecode.decodeWith state FutureDecode.dec
+    |> FutureDecode.mapResult @TestDec
 
