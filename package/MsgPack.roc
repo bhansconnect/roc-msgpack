@@ -20,8 +20,8 @@ module [
 import FutureEncode exposing [FutureEncoder, FutureEncoderFormatting, SequenceWalker, MappingWalker, FutureEncoding]
 import FutureDecode exposing [FutureDecoder, FutureDecoderFormatting, SequenceInit, SequenceBuilder, MappingInit, MappingBuilder, FutureDecoding]
 
-EncodeError : [U128Unsupported, I128Unsupported, DecUnsupported]
-EncodeState : List U8
+EncodeError : [U128Unsupported, I128Unsupported, DecUnsupported, CollectionTooLarge U64]
+EncodeState : { bytes : List U8, encodeFieldNames : Bool }
 
 MsgPack := Result EncodeState EncodeError
     implements [
@@ -75,6 +75,12 @@ MsgPack := Result EncodeState EncodeError
 # =====================================
 # Encode
 # =====================================
+
+encode : val -> Result (List U8) EncodeError where val implements FutureEncoding
+encode = \val ->
+    init = @MsgPack (Ok { bytes: [], encodeFieldNames: Bool.false })
+    (@MsgPack res) = FutureEncode.append init val
+    Result.map res .bytes
 
 # TODO: When the compiler is fixed, remove all the Num.intCast's for this constant.
 maxPosFixInt = 0x7F
@@ -363,8 +369,39 @@ expect
     got == want
 
 encodeBool : Bool -> FutureEncoder MsgPack
+encodeBool = \v ->
+    if v then
+        { bytes } <- tryEncode
+        bytes
+        |> List.append 0xC3
+        |> Ok
+    else
+        { bytes } <- tryEncode
+        bytes
+        |> List.append 0xC2
+        |> Ok
+
+expect
+    got = encode (@TestBool Bool.true)
+    want = Ok [0xC3]
+    got == want
+
+expect
+    got = encode (@TestBool Bool.false)
+    want = Ok [0xC2]
+    got == want
 
 encodeString : Str -> FutureEncoder MsgPack
+encodeString = \str ->
+    { bytes } <- tryEncode
+    bytes
+    |> writeStrHeader (Str.countUtf8Bytes str)
+    |> Result.map \b -> List.concatUtf8 b str
+
+expect
+    got = encode (@TestStr "Hello, World!")
+    want = Ok [0xad, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x57, 0x6f, 0x72, 0x6c, 0x64, 0x21]
+    got == want
 
 encodeSequence :
     seq,
@@ -381,20 +418,40 @@ encodeMapping :
     (val -> FutureEncoder MsgPack)
     -> FutureEncoder MsgPack
 
-encodeRecord : U64, (FutureEncoder MsgPack -> FutureEncoder MsgPack) -> FutureEncoder MsgPack
+encodeRecord : U64, FutureEncoder MsgPack -> FutureEncoder MsgPack
+encodeRecord = \size, addFields ->
+    encodeHeader size
+    |> FutureEncode.chain addFields
 
-encodeNamedField : FutureEncoder MsgPack, { key : Str, value : FutureEncoder MsgPack } -> FutureEncoder MsgPack
+encodeNamedField : Str, FutureEncoder MsgPack -> FutureEncoder MsgPack
+encodeNamedField = \key, value ->
+    FutureEncode.custom \@MsgPack res ->
+        when res is
+            Ok { bytes, encodeFieldNames } ->
+                if encodeFieldNames then
+                    @MsgPack (Ok { bytes, encodeFieldNames })
+                    |> FutureEncode.appendWith (encodeString key)
+                    |> FutureEncode.appendWith value
+                else
+                    @MsgPack (Ok { bytes, encodeFieldNames })
+                    |> FutureEncode.appendWith value
 
-encodeTuple : U64, (FutureEncoder MsgPack -> FutureEncoder MsgPack) -> FutureEncoder MsgPack
+            Err e ->
+                @MsgPack (Err e)
 
-encodeTag : Str, U64, (FutureEncoder MsgPack -> FutureEncoder MsgPack) -> FutureEncoder MsgPack
+# TODO: Figure out why this breaks the compiler and if there is a workaround.
+# Seems specific to this line in encodeRecord:
+#     |> FutureEncode.chain addFields
+# expect
+#     got = encode (@TestRGB { r: 255, g: 255, b: 0 })
+#     want = Ok [0x93, 0xCC, 0xFF, 0xCC, 0xFF, 0x00]
+#     got == want
 
-encodeField : FutureEncoder MsgPack, FutureEncoder MsgPack -> FutureEncoder MsgPack
+encodeTuple : U64, FutureEncoder MsgPack -> FutureEncoder MsgPack
 
-encode : val -> Result (List U8) EncodeError where val implements FutureEncoding
-encode = \val ->
-    (@MsgPack res) = FutureEncode.append (@MsgPack (Ok [])) val
-    res
+encodeTag : Str, U64, FutureEncoder MsgPack -> FutureEncoder MsgPack
+
+encodeField : FutureEncoder MsgPack -> FutureEncoder MsgPack
 
 # =====================================
 # Exact MsgPack Type Encoders
@@ -402,22 +459,29 @@ encode = \val ->
 # These are for the exact types in the msgpack spec
 # These assume the correct encoder was chosen that will lead to minimal sized results.
 
-tryEncode : (EncodeState -> Result EncodeState EncodeError) -> FutureEncoder MsgPack
+tryEncode : (EncodeState -> Result (List U8) EncodeError) -> FutureEncoder MsgPack
 tryEncode = \cont ->
     FutureEncode.custom \@MsgPack res ->
-        Result.try res cont
-        |> @MsgPack
+        when res is
+            Ok state ->
+                cont state
+                |> Result.map \bytes ->
+                    { state & bytes }
+                |> @MsgPack
+
+            Err e ->
+                @MsgPack (Err e)
 
 encodePosFixInt : U8 -> FutureEncoder MsgPack
 encodePosFixInt = \n ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     bytes
     |> List.append n
     |> Ok
 
 encodeUInt8 : U8 -> FutureEncoder MsgPack
 encodeUInt8 = \n ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     bytes
     |> List.reserve 2
     |> List.append 0xCC
@@ -426,7 +490,7 @@ encodeUInt8 = \n ->
 
 encodeUInt16 : U16 -> FutureEncoder MsgPack
 encodeUInt16 = \n ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     b0 = Num.shiftRightZfBy n 8 |> Num.toU8
     b1 = Num.toU8 n
     bytes
@@ -438,7 +502,7 @@ encodeUInt16 = \n ->
 
 encodeUInt32 : U32 -> FutureEncoder MsgPack
 encodeUInt32 = \n ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     b0 = Num.shiftRightZfBy n 24 |> Num.toU8
     b1 = Num.shiftRightZfBy n 16 |> Num.toU8
     b2 = Num.shiftRightZfBy n 8 |> Num.toU8
@@ -454,7 +518,7 @@ encodeUInt32 = \n ->
 
 encodeUInt64 : U64 -> FutureEncoder MsgPack
 encodeUInt64 = \n ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     b0 = Num.shiftRightZfBy n 56 |> Num.toU8
     b1 = Num.shiftRightZfBy n 48 |> Num.toU8
     b2 = Num.shiftRightZfBy n 40 |> Num.toU8
@@ -478,14 +542,14 @@ encodeUInt64 = \n ->
 
 encodeNegFixInt : I8 -> FutureEncoder MsgPack
 encodeNegFixInt = \in ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     bytes
     |> List.append (Num.toU8 in)
     |> Ok
 
 encodeInt8 : I8 -> FutureEncoder MsgPack
 encodeInt8 = \in ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     bytes
     |> List.reserve 2
     |> List.append 0xD0
@@ -494,7 +558,7 @@ encodeInt8 = \in ->
 
 encodeInt16 : I16 -> FutureEncoder MsgPack
 encodeInt16 = \in ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     n = Num.toU16 in
     b0 = Num.shiftRightZfBy n 8 |> Num.toU8
     b1 = Num.toU8 n
@@ -507,7 +571,7 @@ encodeInt16 = \in ->
 
 encodeInt32 : I32 -> FutureEncoder MsgPack
 encodeInt32 = \in ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     n = Num.toU32 in
     b0 = Num.shiftRightZfBy n 24 |> Num.toU8
     b1 = Num.shiftRightZfBy n 16 |> Num.toU8
@@ -524,7 +588,7 @@ encodeInt32 = \in ->
 
 encodeInt64 : I64 -> FutureEncoder MsgPack
 encodeInt64 = \in ->
-    bytes <- tryEncode
+    { bytes } <- tryEncode
     n = Num.toU64 in
     b0 = Num.shiftRightZfBy n 56 |> Num.toU8
     b1 = Num.shiftRightZfBy n 48 |> Num.toU8
@@ -546,6 +610,116 @@ encodeInt64 = \in ->
     |> List.append b6
     |> List.append b7
     |> Ok
+
+encodeHeader : U64 -> FutureEncoder MsgPack
+encodeHeader = \size ->
+    { bytes, encodeFieldNames } <- tryEncode
+    if encodeFieldNames then
+        writeMapHeader bytes size
+    else
+        writeArrayHeader bytes size
+
+writeMapHeader : List U8, U64 -> Result (List U8) EncodeError
+writeMapHeader = \bytes, size ->
+    if size < 16 then
+        Num.toU8 size
+        |> Num.bitwiseOr 0b1000_0000
+        |> \b -> List.append bytes b
+        |> Ok
+    else if size < 0xFFFF_FFFF then
+        b0 = Num.shiftRightZfBy size 8 |> Num.toU8
+        b1 = Num.toU8 size
+        bytes
+        |> List.reserve 3
+        |> List.append 0xDE
+        |> List.append b0
+        |> List.append b1
+        |> Ok
+    else if size < 0xFFFF_FFFF_FFFF_FFFF then
+        b0 = Num.shiftRightZfBy size 24 |> Num.toU8
+        b1 = Num.shiftRightZfBy size 16 |> Num.toU8
+        b2 = Num.shiftRightZfBy size 8 |> Num.toU8
+        b3 = Num.toU8 size
+        bytes
+        |> List.reserve 5
+        |> List.append 0xDF
+        |> List.append b0
+        |> List.append b1
+        |> List.append b2
+        |> List.append b3
+        |> Ok
+    else
+        Err (CollectionTooLarge size)
+
+writeArrayHeader : List U8, U64 -> Result (List U8) EncodeError
+writeArrayHeader = \bytes, size ->
+    if size < 16 then
+        Num.toU8 size
+        |> Num.bitwiseOr 0b1001_0000
+        |> \b -> List.append bytes b
+        |> Ok
+    else if size < 0xFFFF_FFFF then
+        b0 = Num.shiftRightZfBy size 8 |> Num.toU8
+        b1 = Num.toU8 size
+        bytes
+        |> List.reserve 3
+        |> List.append 0xDC
+        |> List.append b0
+        |> List.append b1
+        |> Ok
+    else if size < 0xFFFF_FFFF_FFFF_FFFF then
+        b0 = Num.shiftRightZfBy size 24 |> Num.toU8
+        b1 = Num.shiftRightZfBy size 16 |> Num.toU8
+        b2 = Num.shiftRightZfBy size 8 |> Num.toU8
+        b3 = Num.toU8 size
+        bytes
+        |> List.reserve 5
+        |> List.append 0xDD
+        |> List.append b0
+        |> List.append b1
+        |> List.append b2
+        |> List.append b3
+        |> Ok
+    else
+        Err (CollectionTooLarge size)
+
+writeStrHeader : List U8, U64 -> Result (List U8) EncodeError
+writeStrHeader = \bytes, size ->
+    if size < 32 then
+        Num.toU8 size
+        |> Num.bitwiseOr 0b1010_0000
+        |> \b -> List.append bytes b
+        |> Ok
+    else if size < 0xFFFF then
+        bytes
+        |> List.reserve 2
+        |> List.append 0xD9
+        |> List.append (Num.toU8 size)
+        |> Ok
+    else if size < 0xFFFF_FFFF then
+        b0 = Num.shiftRightZfBy size 8 |> Num.toU8
+        b1 = Num.toU8 size
+        bytes
+        |> List.reserve 3
+        |> List.append 0xDA
+        |> List.append b0
+        |> List.append b1
+        |> Ok
+    else if size < 0xFFFF_FFFF_FFFF_FFFF then
+        b0 = Num.shiftRightZfBy size 24 |> Num.toU8
+        b1 = Num.shiftRightZfBy size 16 |> Num.toU8
+        b2 = Num.shiftRightZfBy size 8 |> Num.toU8
+        b3 = Num.toU8 size
+        bytes
+        |> List.reserve 5
+        |> List.append 0xDB
+        |> List.append b0
+        |> List.append b1
+        |> List.append b2
+        |> List.append b3
+        |> Ok
+    else
+        Err (CollectionTooLarge size)
 
 # =====================================
 # Decode
@@ -820,4 +994,66 @@ decoderTestDec : FutureDecoder state TestDec err where state implements FutureDe
 decoderTestDec = FutureDecode.custom \state ->
     FutureDecode.decodeWith state FutureDecode.dec
     |> FutureDecode.mapResult @TestDec
+
+TestBool := Bool
+    implements [
+        FutureEncoding {
+            toFutureEncoder: toFutureEncoderTestBool,
+        },
+        FutureDecoding {
+            decoder: decoderTestBool,
+        },
+    ]
+
+toFutureEncoderTestBool : TestBool -> FutureEncoder state
+toFutureEncoderTestBool = \@TestBool bool ->
+    FutureEncode.bool bool
+
+decoderTestBool : FutureDecoder state TestBool err where state implements FutureDecoderFormatting
+decoderTestBool = FutureDecode.custom \state ->
+    FutureDecode.decodeWith state FutureDecode.bool
+    |> FutureDecode.mapResult @TestBool
+
+TestStr := Str
+    implements [
+        FutureEncoding {
+            toFutureEncoder: toFutureEncoderTestStr,
+        },
+        FutureDecoding {
+            decoder: decoderTestStr,
+        },
+    ]
+
+toFutureEncoderTestStr : TestStr -> FutureEncoder state
+toFutureEncoderTestStr = \@TestStr str ->
+    FutureEncode.string str
+
+decoderTestStr : FutureDecoder state TestStr err where state implements FutureDecoderFormatting
+decoderTestStr = FutureDecode.custom \state ->
+    FutureDecode.decodeWith state FutureDecode.string
+    |> FutureDecode.mapResult @TestStr
+
+TestRGB := { r : U8, g : U8, b : U8 }
+    implements [
+        FutureEncoding {
+            toFutureEncoder: toFutureEncoderTestRGB,
+        },
+        FutureDecoding {
+            decoder: decoderTestRGB,
+        },
+    ]
+
+toFutureEncoderTestRGB : TestRGB -> FutureEncoder state
+toFutureEncoderTestRGB = \@TestRGB { r, g, b } ->
+    encodeFields =
+        FutureEncode.namedField "r" (FutureEncode.u8 r)
+        |> FutureEncode.chain (FutureEncode.namedField "g" (FutureEncode.u8 g))
+        |> FutureEncode.chain (FutureEncode.namedField "b" (FutureEncode.u8 b))
+
+    FutureEncode.record 3 encodeFields
+
+decoderTestRGB : FutureDecoder state TestRGB err where state implements FutureDecoderFormatting
+# decoderTestRGB = FutureDecode.custom \state ->
+#     FutureDecode.decodeWith state FutureDecode.bool
+#     |> FutureDecode.mapResult @TestRGB
 
