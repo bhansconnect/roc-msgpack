@@ -41,7 +41,7 @@ FutureEncoding implements
 SequenceWalker state seq elem : seq, state, (state, elem -> state) -> state
 MappingWalker state map key val : map, state, (state, key, val -> state) -> state
 
-NamedFieldFn opaqueState state : opaqueState, Str, FutureEncoder state -> opaqueState
+NamedFieldFn opaque val : opaque, Str, val -> opaque where val implements FutureEncoding
 
 FutureEncoderFormatting implements
     u8 : U8 -> FutureEncoder state where state implements FutureEncoderFormatting
@@ -76,7 +76,7 @@ FutureEncoderFormatting implements
     # Note, the U64s below are the number of fields.
     # records must be passed an encoder that appends all fields using `namedField` calls only.
 
-    record : U64, (opaqueState, NamedFieldFn opaqueState state -> opaqueState) -> FutureEncoder state where state implements FutureEncoderFormatting
+    record : U64, (opaque, NamedFieldFn opaque val -> opaque) -> FutureEncoder state where val implements FutureEncoding, state implements FutureEncoderFormatting
 
     # tuple and tag must be passed an encoder that appends all fields using `field` calls only.
     tuple : U64, FutureEncoder state -> FutureEncoder state where state implements FutureEncoderFormatting

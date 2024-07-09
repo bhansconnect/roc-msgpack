@@ -417,24 +417,25 @@ encodeMapping :
     (val -> FutureEncoder MsgPack)
     -> FutureEncoder MsgPack
 
-encodeRecord : U64, (MsgPack, FutureEncode.NamedFieldFn MsgPack MsgPack -> MsgPack) -> FutureEncoder MsgPack
+encodeRecord : U64, (MsgPack, FutureEncode.NamedFieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
 encodeRecord = \size, addFields ->
     msgPack <- FutureEncode.custom
     msgPack
     |> FutureEncode.appendWith (encodeHeader size)
     |> addFields encodeNamedField
 
-encodeNamedField : MsgPack, Str, FutureEncoder MsgPack -> MsgPack
+encodeNamedField : MsgPack, Str, value -> MsgPack where value implements FutureEncoding
 encodeNamedField = \@MsgPack res, key, value ->
+    valueEncoder = FutureEncode.toFutureEncoder value
     when res is
         Ok { bytes, encodeFieldNames } ->
             if encodeFieldNames then
                 @MsgPack (Ok { bytes, encodeFieldNames })
                 |> FutureEncode.appendWith (encodeString key)
-                |> FutureEncode.appendWith value
+                |> FutureEncode.appendWith valueEncoder
             else
                 @MsgPack (Ok { bytes, encodeFieldNames })
-                |> FutureEncode.appendWith value
+                |> FutureEncode.appendWith valueEncoder
 
         Err e ->
             @MsgPack (Err e)
@@ -1045,9 +1046,9 @@ toFutureEncoderTestRGB : TestRGB -> FutureEncoder state
 toFutureEncoderTestRGB = \@TestRGB { r, g, b } ->
     FutureEncode.record 3 \state, addNamedField ->
         state
-        |> addNamedField "r" (FutureEncode.u8 r)
-        |> addNamedField "g" (FutureEncode.u8 g)
-        |> addNamedField "b" (FutureEncode.u8 b)
+        |> addNamedField "r" (@TestU8 r)
+        |> addNamedField "g" (@TestU8 g)
+        |> addNamedField "b" (@TestU8 b)
 
 decoderTestRGB : FutureDecoder state TestRGB err where state implements FutureDecoderFormatting
 # decoderTestRGB = FutureDecode.custom \state ->
