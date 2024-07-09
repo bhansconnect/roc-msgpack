@@ -44,7 +44,6 @@ MsgPack := Result EncodeState EncodeError
             sequence: encodeSequence,
             mapping: encodeMapping,
             record: encodeRecord,
-            namedField: encodeNamedField,
             tuple: encodeTuple,
             tag: encodeTag,
             field: encodeField,
@@ -418,30 +417,29 @@ encodeMapping :
     (val -> FutureEncoder MsgPack)
     -> FutureEncoder MsgPack
 
-encodeRecord : U64, FutureEncoder MsgPack -> FutureEncoder MsgPack
+encodeRecord : U64, (MsgPack, FutureEncode.NamedFieldFn MsgPack MsgPack -> MsgPack) -> FutureEncoder MsgPack
 encodeRecord = \size, addFields ->
-    encodeHeader size
-    |> FutureEncode.chain addFields
+    msgPack <- FutureEncode.custom
+    msgPack
+    |> FutureEncode.appendWith (encodeHeader size)
+    |> addFields encodeNamedField
 
-encodeNamedField : Str, FutureEncoder MsgPack -> FutureEncoder MsgPack
-encodeNamedField = \key, value ->
-    FutureEncode.custom \@MsgPack res ->
-        when res is
-            Ok { bytes, encodeFieldNames } ->
-                if encodeFieldNames then
-                    @MsgPack (Ok { bytes, encodeFieldNames })
-                    |> FutureEncode.appendWith (encodeString key)
-                    |> FutureEncode.appendWith value
-                else
-                    @MsgPack (Ok { bytes, encodeFieldNames })
-                    |> FutureEncode.appendWith value
+encodeNamedField : MsgPack, Str, FutureEncoder MsgPack -> MsgPack
+encodeNamedField = \@MsgPack res, key, value ->
+    when res is
+        Ok { bytes, encodeFieldNames } ->
+            if encodeFieldNames then
+                @MsgPack (Ok { bytes, encodeFieldNames })
+                |> FutureEncode.appendWith (encodeString key)
+                |> FutureEncode.appendWith value
+            else
+                @MsgPack (Ok { bytes, encodeFieldNames })
+                |> FutureEncode.appendWith value
 
-            Err e ->
-                @MsgPack (Err e)
+        Err e ->
+            @MsgPack (Err e)
 
 # TODO: Figure out why this breaks the compiler and if there is a workaround.
-# Seems specific to this line in encodeRecord:
-#     |> FutureEncode.chain addFields
 # expect
 #     got = encode (@TestRGB { r: 255, g: 255, b: 0 })
 #     want = Ok [0x93, 0xCC, 0xFF, 0xCC, 0xFF, 0x00]
@@ -1045,12 +1043,11 @@ TestRGB := { r : U8, g : U8, b : U8 }
 
 toFutureEncoderTestRGB : TestRGB -> FutureEncoder state
 toFutureEncoderTestRGB = \@TestRGB { r, g, b } ->
-    encodeFields =
-        FutureEncode.namedField "r" (FutureEncode.u8 r)
-        |> FutureEncode.chain (FutureEncode.namedField "g" (FutureEncode.u8 g))
-        |> FutureEncode.chain (FutureEncode.namedField "b" (FutureEncode.u8 b))
-
-    FutureEncode.record 3 encodeFields
+    FutureEncode.record 3 \state, addNamedField ->
+        state
+        |> addNamedField "r" (FutureEncode.u8 r)
+        |> addNamedField "g" (FutureEncode.u8 g)
+        |> addNamedField "b" (FutureEncode.u8 b)
 
 decoderTestRGB : FutureDecoder state TestRGB err where state implements FutureDecoderFormatting
 # decoderTestRGB = FutureDecode.custom \state ->
