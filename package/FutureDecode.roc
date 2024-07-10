@@ -31,6 +31,7 @@ module [
     decode,
     decodeWith,
     mapResult,
+    LengthInfo,
 ]
 
 ## Return type of a [FutureDecoder].
@@ -44,11 +45,13 @@ FutureDecoder state val err := state -> FutureDecodeResult state val err where s
 FutureDecoding implements
     decoder : FutureDecoder state val err where val implements FutureDecoding, state implements FutureDecoderFormatting
 
-SequenceInit seq : [Size U64, UnknownSize] -> seq
+SequenceInit seq : LengthInfo -> seq
 SequenceBuilder seq elem : seq, elem -> seq
 
-MappingInit map : [Size U64, UnknownSize] -> map
+MappingInit map : LengthInfo -> map
 MappingBuilder map key val : map, key, val -> map
+
+LengthInfo : [Length U64, UnknownLength]
 
 ## Definition of the [FutureDecoderFormatting] ability
 FutureDecoderFormatting implements
