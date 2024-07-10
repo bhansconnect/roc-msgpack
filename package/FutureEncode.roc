@@ -23,14 +23,13 @@ module [
     record,
     tag,
     tuple,
-    field,
     custom,
     appendWith,
     append,
-    chain,
     SequenceWalker,
     MappingWalker,
     NamedFieldFn,
+    FieldFn,
 ]
 
 FutureEncoder state := state -> state where state implements FutureEncoderFormatting
@@ -42,6 +41,7 @@ SequenceWalker state seq elem : seq, state, (state, elem -> state) -> state
 MappingWalker state map key val : map, state, (state, key, val -> state) -> state
 
 NamedFieldFn opaque val : opaque, Str, val -> opaque where val implements FutureEncoding
+FieldFn opaque val : opaque, val -> opaque where val implements FutureEncoding
 
 FutureEncoderFormatting implements
     u8 : U8 -> FutureEncoder state where state implements FutureEncoderFormatting
@@ -74,14 +74,10 @@ FutureEncoderFormatting implements
         -> FutureEncoder state where state implements FutureEncoderFormatting
 
     # Note, the U64s below are the number of fields.
-    # records must be passed an encoder that appends all fields using `namedField` calls only.
-
+    # record, tuple, and tag take a closure that will add their fields to the FutureEncoder state.
     record : U64, (opaque, NamedFieldFn opaque val -> opaque) -> FutureEncoder state where val implements FutureEncoding, state implements FutureEncoderFormatting
-
-    # tuple and tag must be passed an encoder that appends all fields using `field` calls only.
-    tuple : U64, FutureEncoder state -> FutureEncoder state where state implements FutureEncoderFormatting
-    tag : Str, U64, FutureEncoder state -> FutureEncoder state where state implements FutureEncoderFormatting
-    field : FutureEncoder state -> FutureEncoder state where state implements FutureEncoderFormatting
+    tuple : U64, (opaque, FieldFn opaque val -> opaque) -> FutureEncoder state where state implements FutureEncoderFormatting
+    tag : Str, U64, (opaque, FieldFn opaque val -> opaque) -> FutureEncoder state where state implements FutureEncoderFormatting
 
 ## Creates a custom encoder from a given function.
 ##
@@ -112,10 +108,3 @@ appendWith = \state, @FutureEncoder doFutureEncoding -> doFutureEncoding state
 ## ```
 append : state, val -> state where val implements FutureEncoding, state implements FutureEncoderFormatting
 append = \state, val -> appendWith state (toFutureEncoder val)
-
-chain : FutureEncoder state, FutureEncoder state -> FutureEncoder state where state implements FutureEncoderFormatting
-chain = \@FutureEncoder doFutureEncodingA, @FutureEncoder doFutureEncodingB ->
-    custom \state ->
-        state
-        |> doFutureEncodingA
-        |> doFutureEncodingB

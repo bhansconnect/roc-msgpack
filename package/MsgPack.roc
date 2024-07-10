@@ -46,7 +46,6 @@ MsgPack := Result EncodeState EncodeError
             record: encodeRecord,
             tuple: encodeTuple,
             tag: encodeTag,
-            field: encodeField,
         },
         FutureDecoderFormatting {
             u8: decodeU8,
@@ -469,11 +468,9 @@ encodeNamedField = \@MsgPack res, key, value ->
 #     want = Ok [0x93, 0xCC, 0xFF, 0xCC, 0xFF, 0x00]
 #     got == want
 
-encodeTuple : U64, FutureEncoder MsgPack -> FutureEncoder MsgPack
+encodeTuple : U64, (MsgPack, FutureEncode.FieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
 
-encodeTag : Str, U64, FutureEncoder MsgPack -> FutureEncoder MsgPack
-
-encodeField : FutureEncoder MsgPack -> FutureEncoder MsgPack
+encodeTag : Str, U64, (MsgPack, FutureEncode.FieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
 
 # =====================================
 # Exact MsgPack Type Encoders
