@@ -77,6 +77,11 @@ FutureEncoderFormatting implements
     # record, tuple, and tag take a closure that will add their fields to the FutureEncoder state.
     record : U64, (opaque, NamedFieldFn opaque val -> opaque) -> FutureEncoder state where val implements FutureEncoding, state implements FutureEncoderFormatting
     tuple : U64, (opaque, FieldFn opaque val -> opaque) -> FutureEncoder state where state implements FutureEncoderFormatting
+
+    # TODO: We probably want an indexed tag as well.
+    # It would take an integer index that maps to the tag variant.
+    # Due to how roc tag unions work, it would only be valid for opaque tags.
+    # That said, we could probably make it derive for opaque tags.
     tag : Str, U64, (opaque, FieldFn opaque val -> opaque) -> FutureEncoder state where state implements FutureEncoderFormatting
 
 ## Creates a custom encoder from a given function.
