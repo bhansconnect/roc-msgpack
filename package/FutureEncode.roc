@@ -30,6 +30,7 @@ module [
     MappingWalker,
     NamedFieldFn,
     FieldFn,
+    LengthInfo,
 ]
 
 FutureEncoder state := state -> state where state implements FutureEncoderFormatting
@@ -42,6 +43,8 @@ MappingWalker state map key val : map, state, (state, key, val -> state) -> stat
 
 NamedFieldFn opaque val : opaque, Str, val -> opaque where val implements FutureEncoding
 FieldFn opaque val : opaque, val -> opaque where val implements FutureEncoding
+
+LengthInfo : [Length U64, UnknownLength]
 
 FutureEncoderFormatting implements
     u8 : U8 -> FutureEncoder state where state implements FutureEncoderFormatting
@@ -61,13 +64,13 @@ FutureEncoderFormatting implements
     string : Str -> FutureEncoder state where state implements FutureEncoderFormatting
     sequence :
         seq,
-        [Size U64, UnknownSize],
+        LengthInfo,
         SequenceWalker state seq elem,
         (elem -> FutureEncoder state)
         -> FutureEncoder state where state implements FutureEncoderFormatting
     mapping :
         map,
-        [Size U64, UnknownSize],
+        LengthInfo,
         MappingWalker state key val elem,
         (key -> FutureEncoder state),
         (val -> FutureEncoder state)

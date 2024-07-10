@@ -17,10 +17,10 @@ module [
     encode,
 ]
 
-import FutureEncode exposing [FutureEncoder, FutureEncoderFormatting, SequenceWalker, MappingWalker, FutureEncoding]
+import FutureEncode exposing [FutureEncoder, FutureEncoderFormatting, SequenceWalker, MappingWalker, FutureEncoding, LengthInfo, NamedFieldFn, FieldFn]
 import FutureDecode exposing [FutureDecoder, FutureDecoderFormatting, SequenceInit, SequenceBuilder, MappingInit, MappingBuilder, FutureDecoding]
 
-EncodeError : [U128Unsupported, I128Unsupported, DecUnsupported, CollectionTooLarge U64, UnknownSizeSequencesUnsupported]
+EncodeError : [U128Unsupported, I128Unsupported, DecUnsupported, CollectionTooLarge U64, UnknownLengthSequencesUnsupported]
 EncodeState : { bytes : List U8, encodeFieldNames : Bool }
 
 MsgPack := Result EncodeState EncodeError
@@ -403,24 +403,24 @@ expect
 
 encodeSequence :
     seq,
-    [Size U64, UnknownSize],
+    LengthInfo,
     SequenceWalker MsgPack seq elem,
     (elem -> FutureEncoder MsgPack)
     -> FutureEncoder MsgPack
-encodeSequence = \seq, size, walker, elemEncoder ->
+encodeSequence = \seq, length, walker, elemEncoder ->
     (@MsgPack res) <- FutureEncode.custom
-    when (res, size) is
-        (Ok { bytes, encodeFieldNames }, Size s) ->
+    when (res, length) is
+        (Ok { bytes, encodeFieldNames }, Length l) ->
             withHeader =
                 bytes
-                |> writeArrayHeader s
+                |> writeArrayHeader l
                 |> Result.map \b -> { bytes: b, encodeFieldNames }
                 |> @MsgPack
             walker seq withHeader \state, elem ->
                 FutureEncode.appendWith state (elemEncoder elem)
 
-        (Ok _, UnknownSize) ->
-            @MsgPack (Err UnknownSizeSequencesUnsupported)
+        (Ok _, UnknownLength) ->
+            @MsgPack (Err UnknownLengthSequencesUnsupported)
 
         (Err e, _) ->
             @MsgPack (Err e)
@@ -433,13 +433,13 @@ encodeSequence = \seq, size, walker, elemEncoder ->
 
 encodeMapping :
     map,
-    [Size U64, UnknownSize],
+    LengthInfo,
     MappingWalker MsgPack key val elem,
     (key -> FutureEncoder MsgPack),
     (val -> FutureEncoder MsgPack)
     -> FutureEncoder MsgPack
 
-encodeRecord : U64, (MsgPack, FutureEncode.NamedFieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
+encodeRecord : U64, (MsgPack, NamedFieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
 encodeRecord = \size, addFields ->
     msgPack <- FutureEncode.custom
     msgPack
@@ -468,9 +468,9 @@ encodeNamedField = \@MsgPack res, key, value ->
 #     want = Ok [0x93, 0xCC, 0xFF, 0xCC, 0xFF, 0x00]
 #     got == want
 
-encodeTuple : U64, (MsgPack, FutureEncode.FieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
+encodeTuple : U64, (MsgPack, FieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
 
-encodeTag : Str, U64, (MsgPack, FutureEncode.FieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
+encodeTag : Str, U64, (MsgPack, FieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
 
 # =====================================
 # Exact MsgPack Type Encoders
@@ -1065,7 +1065,7 @@ TestList := List U8
 
 toFutureEncoderTestList : TestList -> FutureEncoder state
 toFutureEncoderTestList = \@TestList list ->
-    FutureEncode.sequence list (Size (List.len list)) List.walk FutureEncode.u8
+    FutureEncode.sequence list (Length (List.len list)) List.walk FutureEncode.u8
 
 decoderTestList : FutureDecoder state TestList err where state implements FutureDecoderFormatting
 # decoderTestList = FutureDecode.custom \state ->
