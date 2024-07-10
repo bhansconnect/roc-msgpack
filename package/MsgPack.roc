@@ -20,7 +20,7 @@ module [
 import FutureEncode exposing [FutureEncoder, FutureEncoderFormatting, SequenceWalker, MappingWalker, FutureEncoding]
 import FutureDecode exposing [FutureDecoder, FutureDecoderFormatting, SequenceInit, SequenceBuilder, MappingInit, MappingBuilder, FutureDecoding]
 
-EncodeError : [U128Unsupported, I128Unsupported, DecUnsupported, CollectionTooLarge U64]
+EncodeError : [U128Unsupported, I128Unsupported, DecUnsupported, CollectionTooLarge U64, UnknownSizeSequencesUnsupported]
 EncodeState : { bytes : List U8, encodeFieldNames : Bool }
 
 MsgPack := Result EncodeState EncodeError
@@ -408,6 +408,29 @@ encodeSequence :
     SequenceWalker MsgPack seq elem,
     (elem -> FutureEncoder MsgPack)
     -> FutureEncoder MsgPack
+encodeSequence = \seq, size, walker, elemEncoder ->
+    (@MsgPack res) <- FutureEncode.custom
+    when (res, size) is
+        (Ok { bytes, encodeFieldNames }, Size s) ->
+            withHeader =
+                bytes
+                |> writeArrayHeader s
+                |> Result.map \b -> { bytes: b, encodeFieldNames }
+                |> @MsgPack
+            walker seq withHeader \state, elem ->
+                FutureEncode.appendWith state (elemEncoder elem)
+
+        (Ok _, UnknownSize) ->
+            @MsgPack (Err UnknownSizeSequencesUnsupported)
+
+        (Err e, _) ->
+            @MsgPack (Err e)
+
+# TODO: Figure out why this breaks the compiler and if there is a workaround.
+# expect
+#     got = encode (@TestList [1, 2, 3, 4])
+#     want = Ok [0x94, 0x01, 0x02, 0x03, 0x04]
+#     got == want
 
 encodeMapping :
     map,
@@ -1031,6 +1054,26 @@ decoderTestStr : FutureDecoder state TestStr err where state implements FutureDe
 decoderTestStr = FutureDecode.custom \state ->
     FutureDecode.decodeWith state FutureDecode.string
     |> FutureDecode.mapResult @TestStr
+
+# Note, this is not encoding as bytes, just as a list of u8s.
+TestList := List U8
+    implements [
+        FutureEncoding {
+            toFutureEncoder: toFutureEncoderTestList,
+        },
+        FutureDecoding {
+            decoder: decoderTestList,
+        },
+    ]
+
+toFutureEncoderTestList : TestList -> FutureEncoder state
+toFutureEncoderTestList = \@TestList list ->
+    FutureEncode.sequence list (Size (List.len list)) List.walk FutureEncode.u8
+
+decoderTestList : FutureDecoder state TestList err where state implements FutureDecoderFormatting
+# decoderTestList = FutureDecode.custom \state ->
+#     FutureDecode.decodeWith state (FutureDecode.sequence )
+#     |> FutureDecode.mapResult @TestList
 
 TestRGB := { r : U8, g : U8, b : U8 }
     implements [
