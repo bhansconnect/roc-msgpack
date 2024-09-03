@@ -196,8 +196,8 @@ expect
 
 encodeU128 : U128 -> FutureEncoder MsgPack
 encodeU128 = \_ ->
-    _ <- tryEncode
-    Err U128Unsupported
+    tryEncode \_ ->
+        Err U128Unsupported
 
 expect
     got = encode (@TestU128 0xBAD)
@@ -344,8 +344,8 @@ expect
 
 encodeI128 : I128 -> FutureEncoder MsgPack
 encodeI128 = \_ ->
-    _ <- tryEncode
-    Err I128Unsupported
+    tryEncode \_ ->
+        Err I128Unsupported
 
 expect
     got = encode (@TestI128 0xBAD)
@@ -358,8 +358,8 @@ encodeF64 : F64 -> FutureEncoder MsgPack
 
 encodeDec : Dec -> FutureEncoder MsgPack
 encodeDec = \_ ->
-    _ <- tryEncode
-    Err DecUnsupported
+    tryEncode \_ ->
+        Err DecUnsupported
 
 expect
     got = encode (@TestDec 0.2)
@@ -369,15 +369,15 @@ expect
 encodeBool : Bool -> FutureEncoder MsgPack
 encodeBool = \v ->
     if v then
-        { bytes } <- tryEncode
-        bytes
-        |> List.append 0xC3
-        |> Ok
+        tryEncode \{ bytes } ->
+            bytes
+            |> List.append 0xC3
+            |> Ok
     else
-        { bytes } <- tryEncode
-        bytes
-        |> List.append 0xC2
-        |> Ok
+        tryEncode \{ bytes } ->
+            bytes
+            |> List.append 0xC2
+            |> Ok
 
 expect
     got = encode (@TestBool Bool.true)
@@ -391,10 +391,10 @@ expect
 
 encodeString : Str -> FutureEncoder MsgPack
 encodeString = \str ->
-    { bytes } <- tryEncode
-    bytes
-    |> writeStrHeader (Str.countUtf8Bytes str)
-    |> Result.map \b -> List.concatUtf8 b str
+    tryEncode \{ bytes } ->
+        bytes
+        |> writeStrHeader (Str.countUtf8Bytes str)
+        |> Result.map \b -> List.concatUtf8 b str
 
 expect
     got = encode (@TestStr "Hello, World!")
@@ -404,26 +404,26 @@ expect
 encodeSequence :
     seq,
     LengthInfo,
-    SequenceWalker MsgPack seq elem,
+    SequenceWalker seq MsgPack elem,
     (elem -> FutureEncoder MsgPack)
     -> FutureEncoder MsgPack
 encodeSequence = \seq, length, walker, elemEncoder ->
-    (@MsgPack res) <- FutureEncode.custom
-    when (res, length) is
-        (Ok { bytes, encodeFieldNames }, Length l) ->
-            withHeader =
-                bytes
-                |> writeArrayHeader l
-                |> Result.map \b -> { bytes: b, encodeFieldNames }
-                |> @MsgPack
-            walker seq withHeader \state, elem ->
-                FutureEncode.appendWith state (elemEncoder elem)
+    FutureEncode.custom \@MsgPack res ->
+        when (res, length) is
+            (Ok { bytes, encodeFieldNames }, Length l) ->
+                withHeader =
+                    bytes
+                    |> writeArrayHeader l
+                    |> Result.map \b -> { bytes: b, encodeFieldNames }
+                    |> @MsgPack
+                walker seq withHeader \state, elem ->
+                    FutureEncode.appendWith state (elemEncoder elem)
 
-        (Ok _, UnknownLength) ->
-            @MsgPack (Err UnknownLengthSequencesUnsupported)
+            (Ok _, UnknownLength) ->
+                @MsgPack (Err UnknownLengthSequencesUnsupported)
 
-        (Err e, _) ->
-            @MsgPack (Err e)
+            (Err e, _) ->
+                @MsgPack (Err e)
 
 # TODO: Figure out why this breaks the compiler and if there is a workaround.
 # expect
@@ -434,17 +434,17 @@ encodeSequence = \seq, length, walker, elemEncoder ->
 encodeMapping :
     map,
     LengthInfo,
-    MappingWalker MsgPack key val elem,
+    MappingWalker map MsgPack key val,
     (key -> FutureEncoder MsgPack),
     (val -> FutureEncoder MsgPack)
     -> FutureEncoder MsgPack
 
 encodeRecord : U64, (MsgPack, NamedFieldFn MsgPack val -> MsgPack) -> FutureEncoder MsgPack
 encodeRecord = \size, addFields ->
-    msgPack <- FutureEncode.custom
-    msgPack
-    |> FutureEncode.appendWith (encodeHeader size)
-    |> addFields encodeNamedField
+    FutureEncode.custom \msgPack ->
+        msgPack
+        |> FutureEncode.appendWith (encodeHeader size)
+        |> addFields encodeNamedField
 
 encodeNamedField : MsgPack, Str, value -> MsgPack where value implements FutureEncoding
 encodeNamedField = \@MsgPack res, key, value ->
@@ -493,150 +493,150 @@ tryEncode = \cont ->
 
 encodePosFixInt : U8 -> FutureEncoder MsgPack
 encodePosFixInt = \n ->
-    { bytes } <- tryEncode
-    bytes
-    |> List.append n
-    |> Ok
+    tryEncode \{ bytes } ->
+        bytes
+        |> List.append n
+        |> Ok
 
 encodeUInt8 : U8 -> FutureEncoder MsgPack
 encodeUInt8 = \n ->
-    { bytes } <- tryEncode
-    bytes
-    |> List.reserve 2
-    |> List.append 0xCC
-    |> List.append n
-    |> Ok
+    tryEncode \{ bytes } ->
+        bytes
+        |> List.reserve 2
+        |> List.append 0xCC
+        |> List.append n
+        |> Ok
 
 encodeUInt16 : U16 -> FutureEncoder MsgPack
 encodeUInt16 = \n ->
-    { bytes } <- tryEncode
-    b0 = Num.shiftRightZfBy n 8 |> Num.toU8
-    b1 = Num.toU8 n
-    bytes
-    |> List.reserve 3
-    |> List.append 0xCD
-    |> List.append b0
-    |> List.append b1
-    |> Ok
+    tryEncode \{ bytes } ->
+        b0 = Num.shiftRightZfBy n 8 |> Num.toU8
+        b1 = Num.toU8 n
+        bytes
+        |> List.reserve 3
+        |> List.append 0xCD
+        |> List.append b0
+        |> List.append b1
+        |> Ok
 
 encodeUInt32 : U32 -> FutureEncoder MsgPack
 encodeUInt32 = \n ->
-    { bytes } <- tryEncode
-    b0 = Num.shiftRightZfBy n 24 |> Num.toU8
-    b1 = Num.shiftRightZfBy n 16 |> Num.toU8
-    b2 = Num.shiftRightZfBy n 8 |> Num.toU8
-    b3 = Num.toU8 n
-    bytes
-    |> List.reserve 5
-    |> List.append 0xCE
-    |> List.append b0
-    |> List.append b1
-    |> List.append b2
-    |> List.append b3
-    |> Ok
+    tryEncode \{ bytes } ->
+        b0 = Num.shiftRightZfBy n 24 |> Num.toU8
+        b1 = Num.shiftRightZfBy n 16 |> Num.toU8
+        b2 = Num.shiftRightZfBy n 8 |> Num.toU8
+        b3 = Num.toU8 n
+        bytes
+        |> List.reserve 5
+        |> List.append 0xCE
+        |> List.append b0
+        |> List.append b1
+        |> List.append b2
+        |> List.append b3
+        |> Ok
 
 encodeUInt64 : U64 -> FutureEncoder MsgPack
 encodeUInt64 = \n ->
-    { bytes } <- tryEncode
-    b0 = Num.shiftRightZfBy n 56 |> Num.toU8
-    b1 = Num.shiftRightZfBy n 48 |> Num.toU8
-    b2 = Num.shiftRightZfBy n 40 |> Num.toU8
-    b3 = Num.shiftRightZfBy n 32 |> Num.toU8
-    b4 = Num.shiftRightZfBy n 24 |> Num.toU8
-    b5 = Num.shiftRightZfBy n 16 |> Num.toU8
-    b6 = Num.shiftRightZfBy n 8 |> Num.toU8
-    b7 = Num.toU8 n
-    bytes
-    |> List.reserve 9
-    |> List.append 0xCF
-    |> List.append b0
-    |> List.append b1
-    |> List.append b2
-    |> List.append b3
-    |> List.append b4
-    |> List.append b5
-    |> List.append b6
-    |> List.append b7
-    |> Ok
+    tryEncode \{ bytes } ->
+        b0 = Num.shiftRightZfBy n 56 |> Num.toU8
+        b1 = Num.shiftRightZfBy n 48 |> Num.toU8
+        b2 = Num.shiftRightZfBy n 40 |> Num.toU8
+        b3 = Num.shiftRightZfBy n 32 |> Num.toU8
+        b4 = Num.shiftRightZfBy n 24 |> Num.toU8
+        b5 = Num.shiftRightZfBy n 16 |> Num.toU8
+        b6 = Num.shiftRightZfBy n 8 |> Num.toU8
+        b7 = Num.toU8 n
+        bytes
+        |> List.reserve 9
+        |> List.append 0xCF
+        |> List.append b0
+        |> List.append b1
+        |> List.append b2
+        |> List.append b3
+        |> List.append b4
+        |> List.append b5
+        |> List.append b6
+        |> List.append b7
+        |> Ok
 
 encodeNegFixInt : I8 -> FutureEncoder MsgPack
 encodeNegFixInt = \in ->
-    { bytes } <- tryEncode
-    bytes
-    |> List.append (Num.toU8 in)
-    |> Ok
+    tryEncode \{ bytes } ->
+        bytes
+        |> List.append (Num.toU8 in)
+        |> Ok
 
 encodeInt8 : I8 -> FutureEncoder MsgPack
 encodeInt8 = \in ->
-    { bytes } <- tryEncode
-    bytes
-    |> List.reserve 2
-    |> List.append 0xD0
-    |> List.append (Num.toU8 in)
-    |> Ok
+    tryEncode \{ bytes } ->
+        bytes
+        |> List.reserve 2
+        |> List.append 0xD0
+        |> List.append (Num.toU8 in)
+        |> Ok
 
 encodeInt16 : I16 -> FutureEncoder MsgPack
 encodeInt16 = \in ->
-    { bytes } <- tryEncode
-    n = Num.toU16 in
-    b0 = Num.shiftRightZfBy n 8 |> Num.toU8
-    b1 = Num.toU8 n
-    bytes
-    |> List.reserve 3
-    |> List.append 0xD1
-    |> List.append b0
-    |> List.append b1
-    |> Ok
+    tryEncode \{ bytes } ->
+        n = Num.toU16 in
+        b0 = Num.shiftRightZfBy n 8 |> Num.toU8
+        b1 = Num.toU8 n
+        bytes
+        |> List.reserve 3
+        |> List.append 0xD1
+        |> List.append b0
+        |> List.append b1
+        |> Ok
 
 encodeInt32 : I32 -> FutureEncoder MsgPack
 encodeInt32 = \in ->
-    { bytes } <- tryEncode
-    n = Num.toU32 in
-    b0 = Num.shiftRightZfBy n 24 |> Num.toU8
-    b1 = Num.shiftRightZfBy n 16 |> Num.toU8
-    b2 = Num.shiftRightZfBy n 8 |> Num.toU8
-    b3 = Num.toU8 n
-    bytes
-    |> List.reserve 5
-    |> List.append 0xD2
-    |> List.append b0
-    |> List.append b1
-    |> List.append b2
-    |> List.append b3
-    |> Ok
+    tryEncode \{ bytes } ->
+        n = Num.toU32 in
+        b0 = Num.shiftRightZfBy n 24 |> Num.toU8
+        b1 = Num.shiftRightZfBy n 16 |> Num.toU8
+        b2 = Num.shiftRightZfBy n 8 |> Num.toU8
+        b3 = Num.toU8 n
+        bytes
+        |> List.reserve 5
+        |> List.append 0xD2
+        |> List.append b0
+        |> List.append b1
+        |> List.append b2
+        |> List.append b3
+        |> Ok
 
 encodeInt64 : I64 -> FutureEncoder MsgPack
 encodeInt64 = \in ->
-    { bytes } <- tryEncode
-    n = Num.toU64 in
-    b0 = Num.shiftRightZfBy n 56 |> Num.toU8
-    b1 = Num.shiftRightZfBy n 48 |> Num.toU8
-    b2 = Num.shiftRightZfBy n 40 |> Num.toU8
-    b3 = Num.shiftRightZfBy n 32 |> Num.toU8
-    b4 = Num.shiftRightZfBy n 24 |> Num.toU8
-    b5 = Num.shiftRightZfBy n 16 |> Num.toU8
-    b6 = Num.shiftRightZfBy n 8 |> Num.toU8
-    b7 = Num.toU8 n
-    bytes
-    |> List.reserve 9
-    |> List.append 0xD3
-    |> List.append b0
-    |> List.append b1
-    |> List.append b2
-    |> List.append b3
-    |> List.append b4
-    |> List.append b5
-    |> List.append b6
-    |> List.append b7
-    |> Ok
+    tryEncode \{ bytes } ->
+        n = Num.toU64 in
+        b0 = Num.shiftRightZfBy n 56 |> Num.toU8
+        b1 = Num.shiftRightZfBy n 48 |> Num.toU8
+        b2 = Num.shiftRightZfBy n 40 |> Num.toU8
+        b3 = Num.shiftRightZfBy n 32 |> Num.toU8
+        b4 = Num.shiftRightZfBy n 24 |> Num.toU8
+        b5 = Num.shiftRightZfBy n 16 |> Num.toU8
+        b6 = Num.shiftRightZfBy n 8 |> Num.toU8
+        b7 = Num.toU8 n
+        bytes
+        |> List.reserve 9
+        |> List.append 0xD3
+        |> List.append b0
+        |> List.append b1
+        |> List.append b2
+        |> List.append b3
+        |> List.append b4
+        |> List.append b5
+        |> List.append b6
+        |> List.append b7
+        |> Ok
 
 encodeHeader : U64 -> FutureEncoder MsgPack
 encodeHeader = \size ->
-    { bytes, encodeFieldNames } <- tryEncode
-    if encodeFieldNames then
-        writeMapHeader bytes size
-    else
-        writeArrayHeader bytes size
+    tryEncode \{ bytes, encodeFieldNames } ->
+        if encodeFieldNames then
+            writeMapHeader bytes size
+        else
+            writeArrayHeader bytes size
 
 writeMapHeader : List U8, U64 -> Result (List U8) EncodeError
 writeMapHeader = \bytes, size ->

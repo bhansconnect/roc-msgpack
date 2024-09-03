@@ -38,8 +38,8 @@ FutureEncoder state := state -> state where state implements FutureEncoderFormat
 FutureEncoding implements
     toFutureEncoder : val -> FutureEncoder state where val implements FutureEncoding, state implements FutureEncoderFormatting
 
-SequenceWalker state seq elem : seq, state, (state, elem -> state) -> state
-MappingWalker state map key val : map, state, (state, key, val -> state) -> state
+SequenceWalker seq state elem : seq, state, (state, elem -> state) -> state
+MappingWalker map state key val : map, state, (state, key, val -> state) -> state
 
 NamedFieldFn opaque val : opaque, Str, val -> opaque where val implements FutureEncoding
 FieldFn opaque val : opaque, val -> opaque where val implements FutureEncoding
@@ -65,13 +65,13 @@ FutureEncoderFormatting implements
     sequence :
         seq,
         LengthInfo,
-        SequenceWalker state seq elem,
+        SequenceWalker seq state elem,
         (elem -> FutureEncoder state)
         -> FutureEncoder state where state implements FutureEncoderFormatting
     mapping :
         map,
         LengthInfo,
-        MappingWalker state key val elem,
+        MappingWalker map state key val,
         (key -> FutureEncoder state),
         (val -> FutureEncoder state)
         -> FutureEncoder state where state implements FutureEncoderFormatting
